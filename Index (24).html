@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shop POS</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#14202b;--mut:#5d6b78;--line:#d5dce3;--acc:#0a6e5c;--acc2:#e8f3f0;--bad:#b3261e;--warn:#9a5b00}
+@media(prefers-color-scheme:dark){:root{--bg:#10171d;--card:#18222b;--ink:#e8eef3;--mut:#93a2af;--line:#2b3946;--acc:#3cc2a5;--acc2:#16322d;--bad:#ff8a80;--warn:#f0b24a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",Roboto,sans-serif}
+header{background:var(--acc);color:#fff;padding:10px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+header b{font-size:17px;margin-right:12px}
+header button{background:transparent;color:#fff;border:1px solid transparent;padding:6px 11px;border-radius:6px;cursor:pointer;font:inherit}
+header button.on{background:#fff;color:var(--acc)}
+@media(prefers-color-scheme:dark){header{color:#06231d}header button{color:#06231d}header button.on{background:#06231d;color:var(--acc)}}
+main{padding:14px;max-width:1200px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
+h3{margin:0 0 10px;font-size:15px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+.two{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}@media(max-width:800px){.two{grid-template-columns:1fr}}
+label{display:block;font-size:12px;color:var(--mut);margin-bottom:2px}
+input,select{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+button.b{background:var(--acc);color:#fff;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit;font-weight:600}
+@media(prefers-color-scheme:dark){button.b{color:#06231d}}
+button.s{background:var(--acc2);color:var(--acc);border:1px solid var(--line);padding:4px 9px;border-radius:5px;cursor:pointer;font:inherit}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--mut);font-weight:600;font-size:12px}td.r,th.r{text-align:right}
+.k{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.k div{background:var(--acc2);border-radius:8px;padding:10px}.k small{color:var(--mut);display:block}.k b{font-size:19px}
+.bad{color:var(--bad)}.warn{color:var(--warn)}.mut{color:var(--mut)}
+.tot{font-size:22px;font-weight:700;text-align:right}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+@media print{header,.np{display:none}}
+</style></head><body>
+<header><b>Shop POS</b><span id="nav"></span></header>
+<main id="app"><p>Loading…</p></main>
+<script>
+const TABS={pos:'Sales',inv:'Inventory',pur:'Purchases',exp:'Expenses',cus:'Credit customers',prf:'Profits'};
+let D={},tab='pos',cart=[],pt='retail',from=today().slice(0,8)+'01',to=today(),cust='',sup='',editId='';
+const $=i=>document.getElementById(i),n=x=>+x||0,f=x=>n(x).toLocaleString('en-KE',{maximumFractionDigits:2});
+function today(){const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
+const run=(fn,...a)=>new Promise((ok,no)=>google.script.run.withSuccessHandler(ok).withFailureHandler(e=>{alert(e.message);no(e)})[fn](...a));
+const v=i=>$(i).value;
+async function load(){D=await run('loadAll');render()}
+function go(t){tab=t;render()}
+function render(){
+ $('nav').innerHTML=Object.entries(TABS).map(([k,l])=>`<button class="${k==tab?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
+ $('app').innerHTML=V[tab]();
+ if(tab=='pos')calc();
+}
+const P=id=>D.Products.find(p=>p.id==id)||{};
+const opts=(a,fn,sel)=>a.map(x=>`<option value="${fn(x)}" ${fn(x)==sel?'selected':''}>${fn(x)}</option>`).join('');
+const popts=sel=>D.Products.map(p=>`<option value="${p.id}" ${p.id==sel?'selected':''}>${p.name}</option>`).join('');
+const inR=d=>d>=from&&d<=to;
+const custBal=c=>D.CreditTxns.filter(t=>t.customer==c).reduce((s,t)=>s+(t.type=='SALE'?n(t.amount):-n(t.amount)),0);
+const supBal=s=>D.Purchases.filter(p=>p.supplier==s).reduce((a,p)=>a+n(p.total)-n(p.paid),0)-D.SupplierPayments.filter(p=>p.supplier==s).reduce((a,p)=>a+n(p.amount),0);
+const suppliers=()=>[...new Set(D.Purchases.map(p=>p.supplier))];
+function range(){return `<div class="row np" style="margin-bottom:10px"><div><label>From</label><input type="date" id="f" value="${from}" onchange="from=this.value;render()"></div><div><label>To</label><input type="date" id="t" value="${to}" onchange="to=this.value;render()"></div></div>`}
+
+const V={
+pos(){return `<div class="two"><div class="card"><h3>New sale</h3>
+ <div class="row"><div><label>Find product</label><input id="q" list="pl" placeholder="Type product name" onchange="addCart(this)"><datalist id="pl">${D.Products.map(p=>`<option value="${p.name}">`).join('')}</datalist></div>
+ <div><label>Price type</label><select onchange="pt=this.value;reprice()"><option value="retail" ${pt=='retail'?'selected':''}>Retail</option><option value="wholesale" ${pt=='wholesale'?'selected':''}>Wholesale</option></select></div></div>
+ <div class="tw"><table><tr><th>Item</th><th class="r">Price</th><th class="r">Qty</th><th class="r">Total</th><th></th></tr>
+ ${cart.map((c,i)=>`<tr><td>${c.name}</td><td class="r"><input style="width:90px" type="number" value="${c.price}" onchange="cart[${i}].price=n(this.value);calc()"></td><td class="r"><input style="width:70px" type="number" value="${c.qty}" onchange="cart[${i}].qty=n(this.value);calc()"></td><td class="r">${f(c.price*c.qty)}</td><td><button class="s" onclick="cart.splice(${i},1);render()">✕</button></td></tr>`).join('')||'<tr><td colspan="5" class="mut">Cart is empty. Search a product above.</td></tr>'}</table></div></div>
+ <div class="card"><h3>Payment</h3><div class="tot" id="tot">0</div>
+ <div class="row"><div><label>Discount</label><input id="disc" type="number" value="0" oninput="calc()"></div><div><label>Customer (needed for credit)</label><select id="cu" onchange="calc()"><option value="">Walk-in</option>${D.Customers.map(c=>`<option>${c.name}</option>`).join('')}</select></div></div>
+ <div class="row"><div><label>Cash</label><input id="cash" type="number" oninput="calc()"></div><div><label>M-Pesa</label><input id="mp" type="number" oninput="calc()"></div><div><label>Bank</label><input id="bk" type="number" oninput="calc()"></div></div>
+ <p id="bal"></p><button class="b" onclick="sell()">Complete sale</button></div></div>
+ <div class="card"><h3>Recent sales</h3><div class="tw"><table><tr><th>Date</th><th>Customer</th><th class="r">Total</th><th class="r">Cash</th><th class="r">M-Pesa</th><th class="r">Bank</th><th class="r">Credit</th></tr>
+ ${D.Sales.slice(-15).reverse().map(s=>`<tr><td>${s.date}</td><td>${s.customer||'Walk-in'}</td><td class="r">${f(s.total)}</td><td class="r">${f(s.cash)}</td><td class="r">${f(s.mpesa)}</td><td class="r">${f(s.bank)}</td><td class="r">${f(s.credit)}</td></tr>`).join('')}</table></div></div>`},
+
+inv(){const e=P(editId),val=D.Products.reduce((a,p)=>[a[0]+n(p.cost)*n(p.stock),a[1]+n(p.retail)*n(p.stock)],[0,0]);
+ const sold={};D.Sales.filter(s=>inR(s.date)).forEach(s=>JSON.parse(s.items).forEach(i=>sold[i.id]=(sold[i.id]||0)+n(i.qty)));
+ const fast=Object.entries(sold).sort((a,b)=>b[1]-a[1]).slice(0,8);
+ return `<div class="k card"><div><small>Stock value (cost)</small><b>${f(val[0])}</b></div><div><small>Stock value (retail)</small><b>${f(val[1])}</b></div><div><small>Products</small><b>${D.Products.length}</b></div><div><small>Low stock</small><b class="warn">${D.Products.filter(p=>n(p.stock)<=n(p.reorder)).length}</b></div></div>
+ <div class="two"><div class="card"><h3>${e.id?'Edit product':'Create new product'}</h3><div class="row">
+ ${[['pn','Name',e.name],['pc','Category',e.category],['pk','Cost price',e.cost],['pr','Retail price',e.retail],['pw','Wholesale price',e.wholesale],['pd','Discount %',e.discount],['ps','Opening stock',e.stock],['pl2','Reorder level',e.reorder]].map(([i,l,x])=>`<div><label>${l}</label><input id="${i}" value="${x??''}"></div>`).join('')}</div>
+ <p><button class="b" onclick="saveProd()">Save product</button> ${e.id?'<button class="s" onclick="editId=\'\';render()">Cancel</button>':''}</p></div>
+ <div class="card"><h3>Add stock</h3><label>Product</label><select id="as">${popts()}</select><label>Quantity</label><input id="aq" type="number"><p><button class="b" onclick="addStock()">Add stock</button></p>
+ <h3>Fast moving (selected period)</h3>${range()}${fast.map(([id,q])=>`<div>${P(id).name||'?'} — <b>${q}</b> sold</div>`).join('')||'<span class="mut">No sales in period</span>'}</div></div>
+ <div class="card"><h3>Products</h3><div class="tw"><table><tr><th>Name</th><th>Category</th><th class="r">Cost</th><th class="r">Wholesale</th><th class="r">Retail</th><th class="r">Disc %</th><th class="r">Stock</th><th class="r">Value</th><th></th></tr>
+ ${D.Products.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td class="r">${f(p.cost)}</td><td class="r">${f(p.wholesale)}</td><td class="r">${f(p.retail)}</td><td class="r">${f(p.discount)}</td><td class="r ${n(p.stock)<=n(p.reorder)?'bad':''}">${f(p.stock)}${n(p.stock)<=n(p.reorder)?' (low)':''}</td><td class="r">${f(n(p.cost)*n(p.stock))}</td><td><button class="s" onclick="editId='${p.id}';render()">Edit</button></td></tr>`).join('')}</table></div></div>`},
+
+pur(){const inv={};D.Purchases.forEach(p=>{const k=p.supplier+'|'+p.invoice;inv[k]=inv[k]||{s:p.supplier,i:p.invoice,d:p.date,t:0,p:0};inv[k].t+=n(p.total);inv[k].p+=n(p.paid)});
+ D.SupplierPayments.forEach(p=>{const k=p.supplier+'|'+p.invoice;if(inv[k])inv[k].p+=n(p.amount)});
+ const s=sup||suppliers()[0]||'';let run=0;
+ const st=[...D.Purchases.filter(p=>p.supplier==s).flatMap(p=>[{d:p.date,r:'Invoice '+p.invoice,dr:n(p.total),cr:0},{d:p.date,r:'Paid at purchase',dr:0,cr:n(p.paid)}]),...D.SupplierPayments.filter(p=>p.supplier==s).map(p=>({d:p.date,r:'Payment '+(p.invoice||'')+' ('+p.mode+')',dr:0,cr:n(p.amount)}))].filter(x=>x.dr||x.cr).sort((a,b)=>a.d<b.d?-1:1);
+ return `<div class="two"><div class="card"><h3>Record purchase</h3><div class="row">
+ <div><label>Date</label><input id="ud" type="date" value="${today()}"></div><div><label>Invoice no.</label><input id="ui"></div><div><label>Supplier</label><input id="us" list="sl"><datalist id="sl">${suppliers().map(x=>`<option>${x}`).join('')}</datalist></div>
+ <div><label>Product</label><select id="up">${popts()}</select></div><div><label>Qty</label><input id="uq" type="number"></div><div><label>Unit cost</label><input id="uc" type="number"></div><div><label>Paid now</label><input id="ua" type="number" value="0"></div></div>
+ <p><button class="b" onclick="savePur()">Save purchase</button></p></div>
+ <div class="card"><h3>Pay supplier</h3><div class="row"><div><label>Supplier</label><select id="ps2">${opts(suppliers(),x=>x,s)}</select></div><div><label>Invoice no.</label><input id="pi"></div><div><label>Amount</label><input id="pa" type="number"></div><div><label>Mode</label><select id="pm"><option>Cash<option>M-Pesa<option>Bank</select></div></div><p><button class="b" onclick="paySup()">Record payment</button></p></div></div>
+ <div class="card"><h3>Due balances by invoice</h3><div class="tw"><table><tr><th>Date</th><th>Invoice</th><th>Supplier</th><th class="r">Total</th><th class="r">Paid</th><th class="r">Balance</th></tr>
+ ${Object.values(inv).map(x=>`<tr><td>${x.d}</td><td>${x.i}</td><td>${x.s}</td><td class="r">${f(x.t)}</td><td class="r">${f(x.p)}</td><td class="r ${x.t-x.p>0?'bad':''}">${f(x.t-x.p)}</td></tr>`).join('')}</table></div></div>
+ <div class="card"><h3>Creditor statement</h3><select onchange="sup=this.value;render()" class="np" style="max-width:260px">${opts(suppliers(),x=>x,s)}</select><button class="s np" onclick="print()">Print</button>
+ <div class="tw"><table><tr><th>Date</th><th>Details</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance owed</th></tr>${st.map(x=>{run+=x.dr-x.cr;return `<tr><td>${x.d}</td><td>${x.r}</td><td class="r">${f(x.dr)}</td><td class="r">${f(x.cr)}</td><td class="r">${f(run)}</td></tr>`}).join('')}</table></div><p><b>Total owed to ${s||'supplier'}: ${f(s?supBal(s):0)}</b></p></div>`},
+
+exp(){const l=D.Expenses.filter(e=>inR(e.date));
+ return `<div class="card"><h3>Add expense</h3><div class="row"><div><label>Date</label><input id="ed" type="date" value="${today()}"></div><div><label>Category</label><input id="ec" list="ecl"><datalist id="ecl"><option>Rent<option>Salaries<option>Electricity<option>Transport<option>Licences<option>Other</datalist></div><div><label>Description</label><input id="ee"></div><div><label>Amount</label><input id="ea" type="number"></div></div><p><button class="b" onclick="saveExp()">Save expense</button></p></div>
+ <div class="card"><h3>Expenses</h3>${range()}<div class="tw"><table><tr><th>Date</th><th>Category</th><th>Description</th><th class="r">Amount</th></tr>${l.map(e=>`<tr><td>${e.date}</td><td>${e.category}</td><td>${e.description}</td><td class="r">${f(e.amount)}</td></tr>`).join('')}</table></div><p><b>Total: ${f(l.reduce((a,e)=>a+n(e.amount),0))}</b></p></div>`},
+
+cus(){const c=cust||(D.Customers[0]||{}).name||'';let run=0;
+ const t=D.CreditTxns.filter(x=>x.customer==c).sort((a,b)=>a.date<b.date?-1:1);
+ return `<div class="two"><div class="card"><h3>Register credit customer</h3><div class="row"><div><label>Name</label><input id="cn"></div><div><label>Phone</label><input id="cp"></div><div><label>Credit limit</label><input id="cl" type="number"></div></div><p><button class="b" onclick="saveCus()">Register</button></p></div>
+ <div class="card"><h3>Receive payment</h3><div class="row"><div><label>Customer</label><select id="rc">${opts(D.Customers,x=>x.name,c)}</select></div><div><label>Amount</label><input id="ra" type="number"></div><div><label>Mode</label><select id="rm"><option>Cash<option>M-Pesa<option>Bank</select></div></div><p><button class="b" onclick="recvPay()">Record payment</button></p></div></div>
+ <div class="card"><h3>Customers</h3><div class="tw"><table><tr><th>Name</th><th>Phone</th><th class="r">Limit</th><th class="r">Owes</th><th></th></tr>${D.Customers.map(x=>`<tr><td>${x.name}</td><td>${x.phone}</td><td class="r">${f(x.limit)}</td><td class="r ${custBal(x.name)>0?'bad':''}">${f(custBal(x.name))}</td><td><button class="s" onclick="cust='${x.name}';render()">Statement</button></td></tr>`).join('')}</table></div></div>
+ <div class="card"><h3>Statement: ${c}</h3><button class="s np" onclick="print()">Print</button><div class="tw"><table><tr><th>Date</th><th>Type</th><th>Ref</th><th class="r">Charged</th><th class="r">Paid</th><th class="r">Balance</th></tr>${t.map(x=>{const s=x.type=='SALE';run+=s?n(x.amount):-n(x.amount);return `<tr><td>${x.date}</td><td>${x.type}${s?'':' ('+x.mode+')'}</td><td>${x.ref}</td><td class="r">${s?f(x.amount):''}</td><td class="r">${s?'':f(x.amount)}</td><td class="r">${f(run)}</td></tr>`}).join('')}</table></div></div>`},
+
+prf(){const S=D.Sales.filter(s=>inR(s.date)),E=D.Expenses.filter(e=>inR(e.date)),sum=(a,k)=>a.reduce((x,y)=>x+n(y[k]),0);
+ const rev=sum(S,'total'),cogs=sum(S,'cogs'),gross=rev-cogs,ex=sum(E,'amount'),net=gross-ex;
+ return `<div class="card"><h3>Profit and loss</h3>${range()}<div class="k"><div><small>Sales</small><b>${f(rev)}</b></div><div><small>Cost of goods sold</small><b>${f(cogs)}</b></div><div><small>Gross profit</small><b>${f(gross)}</b></div><div><small>Expenses</small><b>${f(ex)}</b></div><div><small>Net profit</small><b class="${net<0?'bad':''}">${f(net)}</b></div></div></div>
+ <div class="card"><h3>Money received by mode</h3><div class="k"><div><small>Cash</small><b>${f(sum(S,'cash'))}</b></div><div><small>M-Pesa</small><b>${f(sum(S,'mpesa'))}</b></div><div><small>Bank</small><b>${f(sum(S,'bank'))}</b></div><div><small>Credit given</small><b>${f(sum(S,'credit'))}</b></div></div></div>
+ <div class="card"><h3>Balances</h3><div class="k"><div><small>Owed by customers</small><b>${f(D.Customers.reduce((a,c)=>a+custBal(c.name),0))}</b></div><div><small>Owed to suppliers</small><b>${f(suppliers().reduce((a,s)=>a+supBal(s),0))}</b></div></div></div>`}
+};
+
+function addCart(el){const p=D.Products.find(x=>x.name==el.value);el.value='';if(!p)return;
+ const ex=cart.find(c=>c.id==p.id);if(ex)ex.qty++;else cart.push({id:p.id,name:p.name,qty:1,cost:n(p.cost),price:pr(p)});render()}
+const pr=p=>pt=='wholesale'?n(p.wholesale):n(p.retail)*(1-n(p.discount)/100);
+function reprice(){cart.forEach(c=>c.price=pr(P(c.id)));render()}
+function calc(){const sub=cart.reduce((a,c)=>a+c.price*c.qty,0),tot=Math.max(0,sub-n(v('disc'))),paid=n(v('cash'))+n(v('mp'))+n(v('bk')),d=tot-paid;
+ $('tot').textContent='Total '+f(tot);$('bal').innerHTML=d>0?`Credit balance: <b class="bad">${f(d)}</b> ${v('cu')?'':'(choose a customer)'}`:`Change: <b>${f(-d)}</b>`}
+async function sell(){if(!cart.length)return alert('Add items first');
+ const sub=cart.reduce((a,c)=>a+c.price*c.qty,0),disc=n(v('disc')),tot=sub-disc,c=n(v('cash')),m=n(v('mp')),b=n(v('bk')),cr=Math.max(0,tot-c-m-b);
+ if(cr>0&&!v('cu'))return alert('Choose a registered customer to sell on credit, or enter full payment.');
+ const cu=D.Customers.find(x=>x.name==v('cu'));if(cr>0&&n(cu.limit)&&custBal(cu.name)+cr>n(cu.limit)&&!confirm('Credit limit exceeded. Continue?'))return;
+ const change=Math.max(0,c+m+b-tot);
+ await run('sell',{date:today(),customer:v('cu'),items:JSON.stringify(cart),subtotal:sub,discount:disc,total:tot,cash:c-change,mpesa:m,bank:b,credit:cr,cogs:cart.reduce((a,x)=>a+x.cost*x.qty,0)});
+ cart=[];await load();alert('Sale saved')}
+async function saveProd(){const o={id:editId,name:v('pn'),category:v('pc'),cost:n(v('pk')),retail:n(v('pr')),wholesale:n(v('pw')),discount:n(v('pd')),stock:n(v('ps')),reorder:n(v('pl2'))};
+ if(!o.name)return alert('Enter a product name');await run(editId?'update':'add','Products',o);editId='';await load()}
+async function addStock(){const p=P(v('as'));if(!p.id)return;p.stock=n(p.stock)+n(v('aq'));await run('update','Products',p);await load()}
+async function savePur(){const q=n(v('uq')),c=n(v('uc'));if(!v('ui')||!v('us')||!q)return alert('Enter invoice no., supplier and quantity');
+ await run('purchase',{date:v('ud'),invoice:v('ui'),supplier:v('us'),product:v('up'),qty:q,cost:c,total:q*c,paid:n(v('ua'))});sup=v('us');await load()}
+async function paySup(){if(!v('ps2')||!n(v('pa')))return;await run('add','SupplierPayments',{date:today(),supplier:v('ps2'),invoice:v('pi'),amount:n(v('pa')),mode:v('pm')});await load()}
+async function saveExp(){if(!n(v('ea')))return alert('Enter an amount');await run('add','Expenses',{date:v('ed'),category:v('ec'),description:v('ee'),amount:n(v('ea'))});await load()}
+async function saveCus(){if(!v('cn'))return alert('Enter a name');await run('add','Customers',{name:v('cn'),phone:v('cp'),limit:n(v('cl'))});await load()}
+async function recvPay(){if(!v('rc')||!n(v('ra')))return;cust=v('rc');await run('add','CreditTxns',{date:today(),customer:cust,type:'PAYMENT',amount:n(v('ra')),ref:'',mode:v('rm')});await load()}
+load();
+</script></body></html>
